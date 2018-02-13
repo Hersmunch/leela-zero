@@ -441,12 +441,12 @@ void Network::winograd_transform_in(const std::vector<float>& in,
                                     const int C) {
     constexpr auto W = 19;
     constexpr auto H = 19;
-    constexpr auto wtiles = (W + 1) / 2;
-    constexpr auto P = wtiles * wtiles;
+    constexpr auto WTILES = (W + 1) / 2;
+    constexpr auto P = WTILES * WTILES;
 
     for (auto ch = 0; ch < C; ch++) {
-        for (auto block_y = 0; block_y < wtiles; block_y++) {
-            for (auto block_x = 0; block_x < wtiles; block_x++) {
+        for (auto block_y = 0; block_y < WTILES; block_y++) {
+            for (auto block_x = 0; block_x < WTILES; block_x++) {
 
                 // Tiles overlap by 2
                 const auto yin = 2 * block_y - 1;
@@ -468,7 +468,7 @@ void Network::winograd_transform_in(const std::vector<float>& in,
                     }
                 }
 
-                const auto offset = ch*P + block_y*wtiles + block_x;
+                const auto offset = ch*P + block_y*WTILES + block_x;
 
                 // Calculates transpose(B).x.B
                 // B = [[ 1.0,  0.0,  0.0,  0.0],
@@ -548,17 +548,17 @@ void Network::winograd_transform_out(const std::vector<float>& M,
                                      const int K) {
     constexpr auto W = 19;
     constexpr auto H = 19;
-    constexpr auto wtiles = (W + 1) / 2;
-    constexpr auto P = wtiles * wtiles;
+    constexpr auto WTILES = (W + 1) / 2;
+    constexpr auto P = WTILES * WTILES;
 
     for (auto k = 0; k < K; k++) {
-        for (auto block_x = 0; block_x < wtiles; block_x++) {
-            for (auto block_y = 0; block_y < wtiles; block_y++) {
+        for (auto block_x = 0; block_x < WTILES; block_x++) {
+            for (auto block_y = 0; block_y < WTILES; block_y++) {
 
                 const auto x = 2 * block_x;
                 const auto y = 2 * block_y;
 
-                const auto b = block_y * wtiles + block_x;
+                const auto b = block_y * WTILES + block_x;
                 std::array<float, WINOGRAD_TILE> temp_m;
                 for (auto xi = 0; xi < WINOGRAD_ALPHA; xi++) {
                     for (auto nu = 0; nu < WINOGRAD_ALPHA; nu++) {
