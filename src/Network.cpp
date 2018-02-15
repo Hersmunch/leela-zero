@@ -451,8 +451,8 @@ void Network::winograd_transform_in(const std::vector<float>& in,
         for (auto block_y = 0; block_y < WTILES; block_y++) {
             // Tiles overlap by 2
             const auto yin = 2 * block_y - 1;
-            for (auto block_x = 0; block_x < WTILES; block_x++) {
 
+            for (auto block_x = 0; block_x < WTILES; block_x++) {
                 const auto xin = 2 * block_x - 1;
 
                 // Cache input tile and handle zero padding
@@ -554,21 +554,21 @@ void Network::winograd_transform_out(const std::vector<float>& M,
     constexpr auto H = 19;
     constexpr auto WTILES = (W + 1) / 2;
     constexpr auto P = WTILES * WTILES;
+    const auto KPpad = K * P;
 
     for (auto k = 0; k < K; k++) {
+        const auto kHW = k * W * H;
+
         for (auto block_x = 0; block_x < WTILES; block_x++) {
+            const auto x = 2*block_x;
+
             for (auto block_y = 0; block_y < WTILES; block_y++) {
-
-                const auto x = 2 * block_x;
-                const auto y = 2 * block_y;
-
+                const auto y = 2*block_y;
                 const auto b = block_y * WTILES + block_x;
+
                 std::array<float, WINOGRAD_TILE> temp_m;
-                for (auto xi = 0; xi < WINOGRAD_ALPHA; xi++) {
-                    for (auto nu = 0; nu < WINOGRAD_ALPHA; nu++) {
-                        temp_m[xi*WINOGRAD_ALPHA + nu] =
-                            M[xi*(WINOGRAD_ALPHA*K*P) + nu*(K*P)+ k*P + b];
-                    }
+                for (int xn = 0, xnKPpad = k*P + b; xn < WINOGRAD_ALPHA*WINOGRAD_ALPHA; xn++, xnKPpad += KPpad) {
+                    temp_m[xn] = M[xnKPpad];
                 }
 
                 // Calculates transpose(A).temp_m.A
@@ -577,34 +577,33 @@ void Network::winograd_transform_out(const std::vector<float>& M,
                 //        [1.0, -1.0],
                 //        [0.0, -1.0]]
 
-                auto o11 =
-                    temp_m[0*4 + 0] + temp_m[0*4 + 1] + temp_m[0*4 + 2] +
-                    temp_m[1*4 + 0] + temp_m[1*4 + 1] + temp_m[1*4 + 2] +
-                    temp_m[2*4 + 0] + temp_m[2*4 + 1] + temp_m[2*4 + 2];
+                float o[4];
+                o[0] = temp_m[0*4 + 0] + temp_m[0*4 + 1] + temp_m[0*4 + 2] +
+                       temp_m[1*4 + 0] + temp_m[1*4 + 1] + temp_m[1*4 + 2] +
+                       temp_m[2*4 + 0] + temp_m[2*4 + 1] + temp_m[2*4 + 2];
 
-                auto o12 =
-                    temp_m[0*4 + 1] - temp_m[0*4 + 2] - temp_m[0*4 + 3] +
-                    temp_m[1*4 + 1] - temp_m[1*4 + 2] - temp_m[1*4 + 3] +
-                    temp_m[2*4 + 1] - temp_m[2*4 + 2] - temp_m[2*4 + 3];
+                o[1] = temp_m[0*4 + 1] - temp_m[0*4 + 2] - temp_m[0*4 + 3] +
+                       temp_m[1*4 + 1] - temp_m[1*4 + 2] - temp_m[1*4 + 3] +
+                       temp_m[2*4 + 1] - temp_m[2*4 + 2] - temp_m[2*4 + 3];
 
-                auto o21 =
-                    temp_m[1*4 + 0] + temp_m[1*4 + 1] + temp_m[1*4 + 2] -
-                    temp_m[2*4 + 0] - temp_m[2*4 + 1] - temp_m[2*4 + 2] -
-                    temp_m[3*4 + 0] - temp_m[3*4 + 1] - temp_m[3*4 + 2];
+                o[2] = temp_m[1*4 + 0] + temp_m[1*4 + 1] + temp_m[1*4 + 2] -
+                       temp_m[2*4 + 0] - temp_m[2*4 + 1] - temp_m[2*4 + 2] -
+                       temp_m[3*4 + 0] - temp_m[3*4 + 1] - temp_m[3*4 + 2];
 
-                auto o22 =
-                    temp_m[1*4 + 1] - temp_m[1*4 + 2] - temp_m[1*4 + 3] -
-                    temp_m[2*4 + 1] + temp_m[2*4 + 2] + temp_m[2*4 + 3] -
-                    temp_m[3*4 + 1] + temp_m[3*4 + 2] + temp_m[3*4 + 3];
+                o[3] = temp_m[1*4 + 1] - temp_m[1*4 + 2] - temp_m[1*4 + 3] -
+                       temp_m[2*4 + 1] + temp_m[2*4 + 2] + temp_m[2*4 + 3] -
+                       temp_m[3*4 + 1] + temp_m[3*4 + 2] + temp_m[3*4 + 3];
 
-                Y[k*(H*W) + (y)*W + (x)] = o11;
+                auto y_ind = kHW + (y)*W + (x);
+
+                Y[y_ind] = o[0];
                 if (x + 1 < W) {
-                    Y[k*(H*W) + (y)*W + (x+1)] = o12;
+                    Y[y_ind + 1] = o[1];
                 }
                 if (y + 1 < H) {
-                    Y[k*(H*W) + (y+1)*W + (x)] = o21;
+                    Y[y_ind + W] = o[2];
                     if (x + 1 < W) {
-                        Y[k*(H*W) + (y+1)*W + (x+1)] = o22;
+                        Y[y_ind + W + 1] = o[3];
                     }
                 }
             }
