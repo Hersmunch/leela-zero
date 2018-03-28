@@ -26,7 +26,6 @@
 #include <functional>
 #include <iterator>
 #include <limits>
-#include <cfloat>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -212,7 +211,7 @@ void UCTNode::accumulate_eval(float eval) {
 
 UCTNode* UCTNode::uct_select_child(int color) {
     UCTNode* best = nullptr;
-    auto best_unvisited_psa = -DBL_MAX;
+    auto best_unvisited_psa = std::numeric_limits<double>::lowest();
 
     LOCK(get_mutex(), lock);
 
@@ -220,14 +219,17 @@ UCTNode* UCTNode::uct_select_child(int color) {
     auto total_visited_policy = 0.0f;
     auto parentvisits = size_t{0};
     for (const auto& child : m_children) {
-        if (child->valid()) {
-            if (!child->first_visit()) {
-                parentvisits += child->get_visits();
-                total_visited_policy += child->get_score();
-            } else if (child->get_score() > best_unvisited_psa) {
-                best_unvisited_psa = child->get_score();
-                best = child.get();
-            }
+        if (!child->valid()) {
+            continue;
+        }
+
+        if (!child->first_visit()) {
+            parentvisits += child->get_visits();
+            total_visited_policy += child->get_score();
+        } else if (child->active() &&
+                   child->get_score() > best_unvisited_psa) {
+            best_unvisited_psa = child->get_score();
+            best = child.get();
         }
     }
 
@@ -237,9 +239,9 @@ UCTNode* UCTNode::uct_select_child(int color) {
     }
 
     auto numerator = std::sqrt((double)parentvisits);
-    auto best_value = -DBL_MAX;
+    auto best_value = std::numeric_limits<double>::lowest();
 
-    if (best_unvisited_psa > -DBL_MAX) {
+    if (best_unvisited_psa > std::numeric_limits<double>::lowest()) {
         // Estimated eval for unknown nodes = original parent NN eval - reduction
         auto fpu_reduction = cfg_fpu_reduction * std::sqrt(total_visited_policy);
         auto fpu_eval = get_net_eval(color) - fpu_reduction;
@@ -248,7 +250,7 @@ UCTNode* UCTNode::uct_select_child(int color) {
     }
 
     for (const auto& child : m_children) {
-        if (!child->valid() || child->first_visit()) {
+        if (!child->active() || child->first_visit()) {
             continue;
         }
 
@@ -257,7 +259,7 @@ UCTNode* UCTNode::uct_select_child(int color) {
         auto denom = 1.0 + child->get_visits();
         auto puct = cfg_puct * psa * (numerator / denom);
         auto value = winrate + puct;
-        assert(value > -DBL_MAX);
+        assert(value > std::numeric_limits<double>::lowest());
 
         if (value > best_value) {
             best_value = value;
