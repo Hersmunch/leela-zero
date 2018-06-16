@@ -888,10 +888,13 @@ static bool probe_cache(const GameState* const state,
             const auto hash = state->get_symmetry_hash(sym);
             if (NNCache::get_NNCache().lookup(hash, result)) {
                 decltype(result.policy) corrected_policy;
+                decltype(result.value_data) corrected_value;
                 corrected_policy.reserve(BOARD_SQUARES);
+                corrected_value.reserve(BOARD_SQUARES);
                 for (auto idx = size_t{0}; idx < BOARD_SQUARES; ++idx) {
                     const auto sym_idx = symmetry_nn_idx_table[sym][idx];
                     corrected_policy.emplace_back(result.policy[sym_idx]);
+                    corrected_value.emplace_back(result.value_data[sym_idx]);
                 }
                 result.policy = std::move(corrected_policy);
                 return true;
@@ -928,6 +931,7 @@ Network::Netresult Network::get_scored_moves(
 
             for (auto idx = size_t{0}; idx < BOARD_SQUARES; idx++) {
                 result.policy[idx] += tmpresult.policy[idx] / static_cast<float>(NUM_SYMMETRIES);
+                result.value_data[idx] += tmpresult.value_data[idx] / static_cast<float>(NUM_SYMMETRIES);
             }
         }
     } else {
@@ -1010,6 +1014,7 @@ Network::Netresult Network::get_scored_moves_internal(
     for (auto idx = size_t{0}; idx < BOARD_SQUARES; idx++) {
         const auto sym_idx = symmetry_nn_idx_table[symmetry][idx];
         result.policy[sym_idx] = outputs[idx];
+        result.value_data[sym_idx] = value_data[idx];
     }
 
     result.policy_pass = outputs[BOARD_SQUARES];
@@ -1018,29 +1023,89 @@ Network::Netresult Network::get_scored_moves_internal(
     return result;
 }
 
-void Network::show_heatmap(const FastState* const state,
-                           const Netresult& result,
-                           const bool topmoves) {
-    std::vector<std::string> display_map;
-    std::string line;
-
-    for (unsigned int y = 0; y < BOARD_SIZE; y++) {
-        for (unsigned int x = 0; x < BOARD_SIZE; x++) {
-            auto score = 0;
-            const auto vertex = state->board.get_vertex(x, y);
-            if (state->board.get_square(vertex) == FastBoard::EMPTY) {
-                score = result.policy[y * BOARD_SIZE + x] * 1000;
-            }
-
-            line += boost::str(boost::format("%3d ") % score);
+std::vector<float> Network::process_value_data(const Netresult& result) {
+    std::array<std::array<float, BOARD_SQUARES>, 256> expanded_winrate_data;
+    for (auto i = 0; i < 256; i++) {
+        const auto bias = ip1_val_b[i] / BOARD_SQUARES;
+        auto sum = 0.0f;
+        for (auto vertex = 0; vertex < BOARD_SQUARES; vertex++) {
+            const auto weight = ip1_val_w[i*BOARD_SQUARES + vertex];
+            expanded_winrate_data[i][vertex] = result.value_data[vertex] * weight + bias;
+            sum += expanded_winrate_data[i][vertex];
         }
-
-        display_map.push_back(line);
-        line.clear();
+        if (sum < 0.0) {
+            for (auto vertex = 0; vertex < BOARD_SQUARES; vertex++) {
+                expanded_winrate_data[i][vertex] = 0.0f;
+            }
+        }
+    }
+    auto value_map_data = std::vector<float>(BOARD_SQUARES);
+    const auto bias = ip2_val_b[0] / (BOARD_SQUARES * 256);
+    for (auto i = 0; i < 256; i++) {
+        const auto weight = ip2_val_w[i];
+        for (auto vertex = 0; vertex < BOARD_SQUARES; vertex++) {
+            value_map_data[vertex] += expanded_winrate_data[i][vertex] * weight + bias;
+        }
     }
 
-    for (int i = display_map.size() - 1; i >= 0; --i) {
-        myprintf("%s\n", display_map[i].c_str());
+    auto den = 1.0f;
+    for (auto vertex = 0; vertex < BOARD_SQUARES; vertex++) {
+        value_map_data[vertex] = std::tanh(value_map_data[vertex]);
+        den += value_map_data[vertex];
+    }
+    for (auto vertex = 0; vertex < BOARD_SQUARES; vertex++) {
+        value_map_data[vertex] /= den;
+    }
+    return value_map_data;
+}
+
+void Network::show_heatmap(const FastState* const state,
+    const Netresult& result,
+    const bool topmoves) {
+    {
+        const auto value_map_data = process_value_data(result);
+        std::vector<std::string> display_map;
+        std::string line;
+        auto sum = 0.0f;
+
+        for (unsigned int y = 0; y < BOARD_SIZE; y++) {
+            for (unsigned int x = 0; x < BOARD_SIZE; x++) {
+                const auto value = value_map_data[y * BOARD_SIZE + x];
+                line += boost::str(boost::format("%3d ") % value);
+                sum += value;
+            }
+
+            display_map.push_back(line);
+            line.clear();
+        }
+
+        for (int i = display_map.size() - 1; i >= 0; --i) {
+            myprintf("%s\n", display_map[i].c_str());
+        }
+        myprintf("%f\n", (1.0f + sum)/2.0f);
+    }
+    {
+        std::vector<std::string> display_map;
+        std::string line;
+
+        for (unsigned int y = 0; y < BOARD_SIZE; y++) {
+            for (unsigned int x = 0; x < BOARD_SIZE; x++) {
+                auto score = 0;
+                const auto vertex = state->board.get_vertex(x, y);
+                if (state->board.get_square(vertex) == FastBoard::EMPTY) {
+                    score = result.policy[y * BOARD_SIZE + x] * 1000;
+                }
+
+                line += boost::str(boost::format("%3d ") % score);
+            }
+
+            display_map.push_back(line);
+            line.clear();
+        }
+
+        for (int i = display_map.size() - 1; i >= 0; --i) {
+            myprintf("%s\n", display_map[i].c_str());
+        }
     }
     const auto pass_score = int(result.policy_pass * 1000);
     myprintf("pass: %d\n", pass_score);

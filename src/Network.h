@@ -43,6 +43,7 @@ public:
     struct Netresult {
         // 19x19 board positions
         std::vector<float> policy;
+        std::vector<float> value_data;
 
         // pass
         float policy_pass;
@@ -50,7 +51,8 @@ public:
         // winrate
         float winrate;
 
-        Netresult() : policy(BOARD_SQUARES), policy_pass(0.0f), winrate(0.0f) {}
+        Netresult() : policy(BOARD_SQUARES), value_data(BOARD_SQUARES),
+                      policy_pass(0.0f), winrate(0.0f) {}
     };
 
     static Netresult get_scored_moves(const GameState* const state,
@@ -110,6 +112,7 @@ private:
                                       const int symmetry);
     static Netresult get_scored_moves_internal(const GameState* const state,
                                                const int symmetry);
+    static std::vector<float> process_value_data(const Netresult& result);
 #if defined(USE_BLAS)
     static void forward_cpu(const std::vector<float>& input,
                             std::vector<float>& output_pol,
