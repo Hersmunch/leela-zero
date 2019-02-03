@@ -792,12 +792,13 @@ Network::Netresult Network::get_output(
 }
 
 Network::Netresult Network::get_output_internal(
-    const GameState* const state, const int symmetry, bool selfcheck) {
+    const GameState* const state, const int symmetry, bool selfcheck,
+    const int vertex_to_flip, const int history_to_flip, bool side_to_flip) {
     assert(symmetry >= 0 && symmetry < NUM_SYMMETRIES);
     constexpr auto width = BOARD_SIZE;
     constexpr auto height = BOARD_SIZE;
 
-    const auto input_data = gather_features(state, symmetry);
+    const auto input_data = gather_features(state, symmetry, vertex_to_flip, history_to_flip, side_to_flip);
     std::vector<float> policy_data(OUTPUTS_POLICY * width * height);
     std::vector<float> value_data(OUTPUTS_VALUE * width * height);
 #ifdef USE_OPENCL_SELFCHECK
@@ -897,6 +898,75 @@ void Network::show_heatmap(const FastState* const state,
     }
 }
 
+void Network::show_ndiff(const GameState* const state, const int move) {
+    const Netresult& result = get_output_internal(
+        state, Network::IDENTITY_SYMMETRY, false);
+    auto result_sum = Netresult{};
+    for (auto idx = size_t{0}; idx < NUM_INTERSECTIONS; idx++) {
+        for (auto h = 0; h < INPUT_MOVES; ++h) {
+            auto tmpresult = get_output_internal(state,
+                Network::IDENTITY_SYMMETRY, false, idx, h, true);
+            auto policy = 0.0f;
+            if (move == FastBoard::PASS) {
+                policy = tmpresult.policy_pass;
+            } else if (move == FastBoard::NO_VERTEX || move == FastBoard::RESIGN) {
+                policy = tmpresult.winrate;
+            } else {
+                const auto xy = state->board.get_xy(move);
+                policy = tmpresult.policy[xy.second * BOARD_SIZE + xy.first];
+            }
+            result_sum.policy[idx] += policy / static_cast<float>(INPUT_MOVES);
+        }
+        //result_sum.policy[idx] /= static_cast<float>(NUM_INTERSECTIONS);
+    }
+    for (auto idx = size_t{ 0 }; idx < NUM_INTERSECTIONS; idx++) {
+        for (auto h = 0; h < INPUT_MOVES; ++h) {
+            auto tmpresult = get_output_internal(state,
+                Network::IDENTITY_SYMMETRY, false, idx, h, false);
+            auto output = 0.0f;
+            if (move == FastBoard::PASS) {
+                output = tmpresult.policy_pass;
+            } else if (move == FastBoard::NO_VERTEX || move == FastBoard::RESIGN) {
+                output = tmpresult.winrate;
+            } else {
+                const auto xy = state->board.get_xy(move);
+                output = tmpresult.policy[xy.second * BOARD_SIZE + xy.first];
+            }
+            result_sum.policy[idx] += output / static_cast<float>(INPUT_MOVES);
+        }
+        result_sum.policy[idx] /= static_cast<float>(NUM_INTERSECTIONS);
+    }
+    std::vector<std::string> display_map;
+    std::string line;
+
+    auto output = 0.0f;
+    if (move == FastBoard::PASS) {
+        output = result.policy_pass;
+    } else if (move == FastBoard::NO_VERTEX || move == FastBoard::RESIGN) {
+        output = result.winrate;
+    } else {
+        const auto xy = state->board.get_xy(move);
+        output = result.policy[xy.second * BOARD_SIZE + xy.first];
+    }
+    for (unsigned int y = 0; y < BOARD_SIZE; y++) {
+        for (unsigned int x = 0; x < BOARD_SIZE; x++) {
+            const auto vertex = state->board.get_vertex(x, y);
+            const auto avg_diff =
+                (1.0f - result_sum.policy[y * BOARD_SIZE + x] / output) * 1000;
+            line += boost::str(boost::format("%3d ") % avg_diff);
+        }
+
+        display_map.push_back(line);
+        line.clear();
+    }
+
+    for (int i = display_map.size() - 1; i >= 0; --i) {
+        myprintf("%s\n", display_map[i].c_str());
+    }
+
+    myprintf("winrate: %f\n", result.winrate);
+}
+
 void Network::fill_input_plane_pair(const FullBoard& board,
                                     std::vector<float>::iterator black,
                                     std::vector<float>::iterator white,
@@ -915,7 +985,10 @@ void Network::fill_input_plane_pair(const FullBoard& board,
 }
 
 std::vector<float> Network::gather_features(const GameState* const state,
-                                            const int symmetry) {
+                                            const int symmetry,
+                                            const int vertex_to_flip,
+                                            const int history_to_flip,
+                                            const bool side_to_flip) {
     assert(symmetry >= 0 && symmetry < NUM_SYMMETRIES);
     auto input_data = std::vector<float>(INPUT_CHANNELS * NUM_INTERSECTIONS);
 
@@ -940,6 +1013,12 @@ std::vector<float> Network::gather_features(const GameState* const state,
                               black_it + h * NUM_INTERSECTIONS,
                               white_it + h * NUM_INTERSECTIONS,
                               symmetry);
+
+    }
+    if ((history_to_flip != -1) && (vertex_to_flip != -1)) {
+        const auto side_it = side_to_flip ? begin(input_data) + INPUT_MOVES * NUM_INTERSECTIONS : begin(input_data);
+        side_it[history_to_flip * NUM_INTERSECTIONS + vertex_to_flip] =
+            float(true) - side_it[history_to_flip * NUM_INTERSECTIONS + vertex_to_flip];
     }
 
     std::fill(to_move_it, to_move_it + NUM_INTERSECTIONS, float(true));

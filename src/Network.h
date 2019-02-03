@@ -94,9 +94,13 @@ public:
                    const int iterations = 1600);
     static void show_heatmap(const FastState * const state,
                              const Netresult & netres, const bool topmoves);
+    void show_ndiff(const GameState* const state, const int move);
 
     static std::vector<float> gather_features(const GameState* const state,
-                                              const int symmetry);
+                                              const int symmetry,
+                                              const int vertex_to_flip = -1,
+                                              const int history_to_flip = -1,
+                                              const bool side_to_flip = false);
     static std::pair<int, int> get_symmetry(const std::pair<int, int>& vertex,
                                             const int symmetry,
                                             const int board_size = BOARD_SIZE);
@@ -130,7 +134,10 @@ private:
                                const std::vector<float>& V,
                                std::vector<float>& M, const int C, const int K);
     Netresult get_output_internal(const GameState* const state,
-                                  const int symmetry, bool selfcheck = false);
+                                  const int symmetry, bool selfcheck = false,
+                                  const int vertex_to_flip = -1,
+                                  const int history_to_flip = -1,
+                                  const bool side_to_flip = false);
     static void fill_input_plane_pair(const FullBoard& board,
                                       std::vector<float>::iterator black,
                                       std::vector<float>::iterator white,

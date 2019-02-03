@@ -862,6 +862,25 @@ void GTP::execute(GameState & game, const std::string& xinput) {
 
         gtp_printf(id, "");
         return;
+    } else if (command.find("ndiff") == 0) {
+        std::istringstream cmdstream(command);
+        std::string tmp;
+        std::string vertex;
+
+        cmdstream >> tmp;   // eat ndiff
+        cmdstream >> vertex;   // eat ndiff
+
+        if (cmdstream.fail()) {
+            vertex = "winrate";
+        }
+        const auto move = game.board.text_to_move(vertex);
+        if ((move == FastBoard::NO_VERTEX || move == FastBoard::RESIGN ||
+             move == FastBoard::PASS || game.board.get_state(move) == FastBoard::EMPTY)) {
+            s_network->show_ndiff(&game, move);
+        }
+
+        gtp_printf(id, "");
+        return;
     } else if (command.find("fixed_handicap") == 0) {
         std::istringstream cmdstream(command);
         std::string tmp;
